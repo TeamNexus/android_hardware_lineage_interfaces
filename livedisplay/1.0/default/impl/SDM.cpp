@@ -24,26 +24,58 @@
 #include "Utils.h"
 #include "impl/SDM.h"
 
-#define DPPS_BUF_SIZE 64
+namespace {
+constexpr int kDppsBufSize = 64;
 
-#define FEATURE_VER_SW_PA_API 0x00000001
-#define FEATURE_VER_SW_COLORBAL_API 0x00000003
-#define FEATURE_VER_SW_SAVEMODES_API 0x00000004
+enum {
+    FEATURE_VER_SW_PA_API = 0x00000001,
+    FEATURE_VER_SW_SAVEMODES_API = 0x00000004,
+};
 
-#define FOSS_ON "foss:on"
-#define FOSS_OFF "foss:off"
+constexpr char kFossProperty[] = "ro.qualcomm.foss";
+constexpr char kFossOn[] = "foss:on";
+constexpr char kFossOff[] = "foss:off";
 
 // For use when only sysfs modes are available
-#define STANDARD_NODE_ID 600
+constexpr int kStandardNodeId = 600;
 
-#define SRGB_NODE "/sys/class/graphics/fb0/srgb"
-#define SRGB_NODE_ID 601
+constexpr char kSrgbNode[] = "/sys/class/graphics/fb0/srgb";
+constexpr int kSrgbNodeId = 601;
 
-#define DCI_P3_NODE "/sys/class/graphics/fb0/dci_p3"
-#define DCI_P3_NODE_ID 602
+constexpr char kDciP3Node[] = "/sys/class/graphics/fb0/dci_p3";
+constexpr int kDciP3NodeId = 602;
 
-#define PRIV_MODE_FLAG_SDM 1
-#define PRIV_MODE_FLAG_SYSFS 2
+enum {
+    PRIV_MODE_FLAG_SDM = 1,
+    PRIV_MODE_FLAG_SYSFS,
+};
+
+struct hsic_config {
+    uint32_t flags;
+    vendor::lineage::livedisplay::V1_0::HSIC data;
+};
+
+struct hsic_float_range {
+    float max;
+    float min;
+    float step;
+};
+
+struct hsic_int_range {
+    int32_t max;
+    int32_t min;
+    uint32_t step;
+};
+
+struct hsic_ranges {
+    uint32_t flags;
+    struct hsic_int_range hue;
+    struct hsic_float_range saturation;
+    struct hsic_float_range intensity;
+    struct hsic_float_range contrast;
+    struct hsic_float_range saturationThreshold;
+};
+}  // anonymous namespace
 
 namespace vendor {
 namespace lineage {
@@ -76,14 +108,14 @@ status_t SDM::initialize() {
         }
     }
 
-    mFOSSEnabled = stol(android::base::GetProperty("ro.qualcomm.foss", "0")) > 0;
+    mFOSSEnabled = android::base::GetBoolProperty(kFossProperty, false);
 
     return OK;
 }
 
 status_t SDM::deinitialize() {
     SDMController::getInstance().deinit(mHandle, 0);
-    mHandle = -1;
+    mHandle = 0;
     return OK;
 }
 
@@ -108,7 +140,7 @@ uint32_t SDM::getNumDisplayModes() {
 }
 
 sp<disp_mode> SDM::getDisplayModeById(int32_t id) {
-    vector<sp<disp_mode>> profiles;
+    std::vector<sp<disp_mode>> profiles;
     status_t rc = getDisplayModes(profiles);
     if (rc == OK) {
         for (const auto& mode : profiles) {
@@ -125,7 +157,7 @@ status_t SDM::setModeState(sp<disp_mode> mode, bool state) {
     int32_t id = 0;
 
     if (mode->privFlags == PRIV_MODE_FLAG_SYSFS) {
-        if (mode->id != STANDARD_NODE_ID) {
+        if (mode->id != kStandardNodeId) {
             LOG(VERBOSE) << "sysfs node: " << mode->privData << " state=" << state;
             return Utils::writeInt(mode->privData.c_str(), state ? 1 : 0);
         } else {
@@ -145,7 +177,7 @@ status_t SDM::setModeState(sp<disp_mode> mode, bool state) {
     return BAD_VALUE;
 }
 
-status_t SDM::getDisplayModes(vector<sp<disp_mode>>& profiles) {
+status_t SDM::getDisplayModes(std::vector<sp<disp_mode>>& profiles) {
     status_t rc = OK;
 
     uint32_t count = getNumDisplayModes();
@@ -156,7 +188,7 @@ status_t SDM::getDisplayModes(vector<sp<disp_mode>>& profiles) {
     if (sdm_count == 0) {
         // sysfs only case, create a dummy standard mode
         const sp<disp_mode> m = new disp_mode;
-        m->id = STANDARD_NODE_ID;
+        m->id = kStandardNodeId;
         m->name = "standard";
         m->privFlags = PRIV_MODE_FLAG_SYSFS;
         m->privData = "";
@@ -167,15 +199,15 @@ status_t SDM::getDisplayModes(vector<sp<disp_mode>>& profiles) {
             int32_t type;
             int32_t len;
             char* name;
+            sdm_mode() : id(-1), type(0), len(128) {
+                name = new char[128];
+            }
+            ~sdm_mode() {
+                delete name;
+            }
         };
 
-        sdm_mode* tmp = new sdm_mode[sdm_count];
-        memset(tmp, 0, sizeof(sdm_mode) * sdm_count);
-        for (uint32_t i = 0; i < sdm_count; i++) {
-            tmp[i].id = -1;
-            tmp[i].name = new char[128];
-            tmp[i].len = 128;
-        }
+        sdm_mode tmp[sdm_count];
 
         uint32_t flags = 0;
         rc = SDMController::getInstance().get_display_modes(mHandle, 0, 0, tmp, sdm_count, &flags);
@@ -188,8 +220,6 @@ status_t SDM::getDisplayModes(vector<sp<disp_mode>>& profiles) {
                 profiles.push_back(m);
             }
         }
-        for (uint32_t i = 0; i < sdm_count; i++) delete tmp[i].name;
-        delete[] tmp;
     }
 
     sp<disp_mode> srgb = getLocalSRGBMode();
@@ -220,32 +250,26 @@ sp<disp_mode> SDM::getDefaultDisplayMode() {
 }
 
 sp<disp_mode> SDM::getLocalSRGBMode() {
-    char path[PATH_MAX];
-    sprintf(path, "%s", SRGB_NODE);
-
-    if (access(path, W_OK) != 0) {
+    if (access(kSrgbNode, W_OK) != 0) {
         return nullptr;
     }
     sp<disp_mode> m = new disp_mode;
-    m->id = SRGB_NODE_ID;
+    m->id = kSrgbNodeId;
     m->name = "srgb";
     m->privFlags = PRIV_MODE_FLAG_SYSFS;
-    m->privData = path;
+    m->privData = kSrgbNode;
     return m;
 }
 
 sp<disp_mode> SDM::getLocalDCIP3Mode() {
-    char path[PATH_MAX];
-    sprintf(path, "%s", DCI_P3_NODE);
-
-    if (access(path, W_OK) != 0) {
+    if (access(kDciP3Node, W_OK) != 0) {
         return nullptr;
     }
     sp<disp_mode> m = new disp_mode;
-    m->id = DCI_P3_NODE_ID;
+    m->id = kDciP3NodeId;
     m->name = "dci_p3";
     m->privFlags = PRIV_MODE_FLAG_SYSFS;
-    m->privData = path;
+    m->privData = kDciP3Node;
     return m;
 }
 
@@ -286,11 +310,9 @@ bool SDM::hasFeature(Feature feature) {
         case Feature::DISPLAY_MODES:
             id = FEATURE_VER_SW_SAVEMODES_API;
             break;
-        case Feature::COLOR_BALANCE:
-            id = FEATURE_VER_SW_COLORBAL_API;
-            break;
         case Feature::PICTURE_ADJUSTMENT:
             id = FEATURE_VER_SW_PA_API;
+            break;
         case Feature::ADAPTIVE_BACKLIGHT:
             if (mFOSSEnabled) {
                 return true;
@@ -308,19 +330,8 @@ bool SDM::hasFeature(Feature feature) {
         return false;
     }
 
-    // Color balance depends on calibration data in SDM
-    if (feature == Feature::DISPLAY_MODES || feature == Feature::COLOR_BALANCE) {
-        if (getNumDisplayModes() > 0) {
-            // make sure the range isn't zero
-            if (feature == Feature::COLOR_BALANCE) {
-                Range r;
-                if (getColorBalanceRange(r) == OK && isNonZero(r)) {
-                    return true;
-                }
-                return false;
-            }
-            return true;
-        }
+    if (feature == Feature::DISPLAY_MODES) {
+        return getNumDisplayModes() > 0;
     } else if (feature == Feature::PICTURE_ADJUSTMENT) {
         HSICRanges r;
         if (getPictureAdjustmentRanges(r) == OK && r.isValid()) {
@@ -343,13 +354,6 @@ status_t SDM::saveInitialDisplayMode() {
         }
     }
     return OK;
-}
-
-status_t SDM::getColorBalanceRange(Range& range) {
-    status_t rc = SDMController::getInstance().get_global_color_balance_range(mHandle, 0, &range);
-    LOG(VERBOSE) << "getColorBalanceRange: min=" << range.min << " max=" << range.max
-                 << " step=" << range.step;
-    return rc;
 }
 
 status_t SDM::getPictureAdjustment(HSIC& hsic) {
@@ -436,33 +440,19 @@ status_t SDM::setAdaptiveBacklightEnabled(bool enabled) {
     if (enabled == mCachedFOSSStatus) {
         return OK;
     }
-    char* buf = new char[DPPS_BUF_SIZE];
-    sprintf(buf, "%s", enabled ? FOSS_ON : FOSS_OFF);
-    if (Utils::sendDPPSCommand(buf, DPPS_BUF_SIZE) == OK) {
+    char buf[kDppsBufSize];
+    sprintf(buf, "%s", enabled ? kFossOn : kFossOff);
+    if (Utils::sendDPPSCommand(buf, kDppsBufSize) == OK) {
         if (strncmp(buf, "Success", 7) == 0) {
             rc = OK;
             mCachedFOSSStatus = enabled;
         }
     }
-    delete[] buf;
     return rc;
 }
 
 bool SDM::isAdaptiveBacklightEnabled() {
     return mCachedFOSSStatus;
-}
-
-int32_t SDM::getColorBalance() {
-    int32_t value = -1;
-    uint32_t flags = 0;
-    if (SDMController::getInstance().get_global_color_balance(mHandle, 0, &value, &flags) != 0) {
-        value = 0;
-    }
-    return value;
-}
-
-status_t SDM::setColorBalance(int32_t balance) {
-    return SDMController::getInstance().set_global_color_balance(mHandle, 0, balance, 0);
 }
 
 status_t SDM::setPictureAdjustment(const HSIC& hsic) {

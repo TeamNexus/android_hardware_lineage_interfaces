@@ -41,26 +41,16 @@ namespace implementation {
 
 using ::android::NO_INIT;
 using ::android::OK;
-using ::std::endl;
-using ::std::ifstream;
-using ::std::ofstream;
-using ::std::string;
-
-status_t Utils::exists(const char* node) {
-    struct stat sbuf;
-    return stat(node, &sbuf);
-}
 
 status_t Utils::readInt(const char* node, int32_t* value) {
-    string buf;
+    std::string buf;
     status_t ret = OK;
-    ifstream fin(node);
+    std::ifstream fin(node);
     if (!fin.good()) {
         return errno;
     }
-    if (getline(fin, buf)) {
-        *value = stoi(buf);
-    } else {
+    fin >> *value;
+    if (fin.fail()) {
         ret = errno;
     }
     fin.close();
@@ -69,11 +59,12 @@ status_t Utils::readInt(const char* node, int32_t* value) {
 
 status_t Utils::writeInt(const char* node, int32_t value) {
     status_t ret = OK;
-    ofstream fout(node);
+    std::ofstream fout(node);
     if (!fout.good()) {
         return errno;
     }
-    if (!(fout << value << endl)) {
+    fout << value << std::endl;
+    if (fout.fail()) {
         ret = errno;
     }
     fout.close();

@@ -26,6 +26,25 @@
 #error "Color backend undefined!"
 #endif
 
+namespace {
+
+using vendor::lineage::livedisplay::V1_0::DisplayMode;
+using vendor::lineage::livedisplay::V1_0::implementation::disp_mode;
+
+DisplayMode modePointerToObj(android::sp<disp_mode> mode) {
+    DisplayMode m;
+    m.id = mode->id;
+    m.name = mode->name;
+    return m;
+}
+
+DisplayMode invalidDisplayMode() {
+    DisplayMode mode;
+    mode.id = -1;
+    return mode;
+}
+}  // anonymous namespace
+
 namespace vendor {
 namespace lineage {
 namespace livedisplay {
@@ -39,7 +58,7 @@ sp<Color> Color::sInstance = nullptr;
 
 Color::Color() : mConnected(false), mBackend(nullptr) {
 #ifdef COLOR_BACKEND_SDM
-    mBackend = new SDM();
+    mBackend = std::make_unique<SDM>();
 #endif
     LOG(DEBUG) << "Loaded LiveDisplay native interface";
 }
@@ -71,7 +90,7 @@ bool Color::connect() {
 
     mFeatures = 0;
 
-    if (mBackend == NULL) {
+    if (mBackend == nullptr) {
         return false;
     }
 
@@ -98,19 +117,6 @@ sp<Color> Color::getInstance() {
     return sInstance;
 }
 
-DisplayMode Color::modePointerToObj(sp<disp_mode> mode) {
-    DisplayMode m;
-    m.id = mode->id;
-    m.name = mode->name;
-    return m;
-}
-
-DisplayMode Color::invalidDisplayMode() {
-    DisplayMode mode;
-    mode.id = -1;
-    return mode;
-}
-
 Return<Features> Color::getSupportedFeatures() {
     connect();
     return mFeatures;
@@ -122,7 +128,7 @@ Return<void> Color::getDisplayModes(getDisplayModes_cb _hidl_cb) {
     Mutex::Autolock _l(mLock);
 
     if (check(Feature::DISPLAY_MODES)) {
-        vector<sp<disp_mode>> spProfiles;
+        std::vector<sp<disp_mode>> spProfiles;
         rc = mBackend->getDisplayModes(spProfiles);
         if (rc != OK) {
             error("Unable to fetch display modes!");
