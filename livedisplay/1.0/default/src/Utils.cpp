@@ -15,6 +15,8 @@
 ** limitations under the License.
 */
 
+#include "Utils.h"
+
 #include <fcntl.h>
 #include <poll.h>
 #include <signal.h>
@@ -26,8 +28,6 @@
 #include <string>
 
 #include <cutils/sockets.h>
-
-#include "Utils.h"
 
 constexpr char LOCAL_STORAGE_PATH[] = "/data/vendor/display";
 constexpr char LOCAL_MODE_ID[] = "livedisplay_mode";
@@ -41,6 +41,7 @@ namespace implementation {
 
 using ::android::NO_INIT;
 using ::android::OK;
+using ::android::status_t;
 
 status_t Utils::readInt(const char* node, int32_t* value) {
     std::string buf;

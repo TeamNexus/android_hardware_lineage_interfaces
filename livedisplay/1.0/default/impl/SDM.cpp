@@ -19,10 +19,13 @@
 
 #define LOG_TAG "LiveDisplay-SDM"
 
-#include <android-base/properties.h>
+#include "impl/SDM.h"
 
 #include "Utils.h"
-#include "impl/SDM.h"
+#include "controller/SDMController.h"
+
+#include <android-base/logging.h>
+#include <android-base/properties.h>
 
 namespace {
 constexpr int kDppsBufSize = 64;
@@ -85,6 +88,8 @@ namespace implementation {
 
 using ::android::BAD_VALUE;
 using ::android::OK;
+using ::android::sp;
+using ::android::status_t;
 
 status_t SDM::initialize() {
     status_t rc = NO_INIT;

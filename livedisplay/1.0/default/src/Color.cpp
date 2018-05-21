@@ -20,11 +20,14 @@
 
 #include "Color.h"
 
-#ifdef COLOR_BACKEND_SDM
+#include "ColorBackend.h"
+#if defined(COLOR_BACKEND_SDM)
 #include "impl/SDM.h"
-#else
-#error "Color backend undefined!"
+#elif defined(COLOR_BACKEND_LEGACYMM)
+#include "impl/LegacyMM.h"
 #endif
+
+#include <android-base/logging.h>
 
 namespace {
 
@@ -51,14 +54,19 @@ namespace livedisplay {
 namespace V1_0 {
 namespace implementation {
 
+using ::android::Mutex;
 using ::android::NO_INIT;
 using ::android::OK;
+using ::android::sp;
+using ::android::status_t;
 
 sp<Color> Color::sInstance = nullptr;
 
 Color::Color() : mConnected(false), mBackend(nullptr) {
-#ifdef COLOR_BACKEND_SDM
+#if defined(COLOR_BACKEND_SDM)
     mBackend = std::make_unique<SDM>();
+#elif defined(COLOR_BACKEND_LEGACYMM)
+    mBackend = std::make_unique<LegacyMM>();
 #endif
     LOG(DEBUG) << "Loaded LiveDisplay native interface";
 }
